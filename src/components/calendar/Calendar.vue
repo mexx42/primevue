@@ -1,7 +1,7 @@
 <template>
     <span :class="containerClass">
         <CalendarInputText ref="input" v-if="!inline" type="text" v-bind="$attrs" v-on="listeners" :value="inputFieldValue" :readonly="!manualInput" :aria-labelledby="ariaLabelledBy" inputmode="none" />
-        <CalendarButton v-if="showIcon" :icon="icon" tabindex="-1" class="p-datepicker-trigger" :disabled="$attrs.disabled" @click="onButtonClick" type="button" :aria-label="inputFieldValue"/>
+        <CalendarButton v-if="showIcon" :icon="icon" :label="iconLabel" tabindex="-1" class="p-datepicker-trigger" :disabled="$attrs.disabled" @click="onButtonClick" type="button" :aria-label="inputFieldValue"/>
         <transition name="p-connected-overlay" @enter="onOverlayEnter" @after-enter="onOverlayEnterComplete" @leave="onOverlayLeave">
             <div ref="overlay" :class="panelStyleClass" v-if="inline ? true : overlayVisible" :role="inline ? null : 'dialog'" :aria-labelledby="ariaLabelledBy">
                 <template v-if="!timeOnly">
@@ -13,8 +13,8 @@
                                     <span class="p-datepicker-prev-icon pi pi-chevron-left"></span>
                                 </button>
                                 <div class="p-datepicker-title">
-                                    <span class="p-datepicker-month" v-if="!monthNavigator && (view !== 'month')">{{getMonthName(month.month)}}</span>
-                                    <select class="p-datepicker-month" v-if="monthNavigator && (view !== 'month') && numberOfMonths === 1" @change="onMonthDropdownChange($event.target.value)">
+                                    <span class="p-datepicker-month" v-if="!monthNavigator && (view !== 'month' && view !== 'week')">{{getMonthName(month.month)}}</span>
+                                    <select class="p-datepicker-month" v-if="monthNavigator && (view !== 'month' && view !== 'week') && numberOfMonths === 1" @change="onMonthDropdownChange($event.target.value)">
                                         <option :value="index" v-for="(monthName, index) of monthNames" :key="monthName" :selected="index === month.month">{{monthName}}</option>
                                     </select>
                                     <span class="p-datepicker-year" v-if="!yearNavigator">{{view === 'month' ? currentYear : month.year}}</span>
@@ -58,6 +58,12 @@
                                 </table>
                             </div>
                         </div>
+                    </div>
+                    <div style="min-width: 23rem;" class="p-monthpicker" v-if="view === 'week'">
+                        <span style="width: 14.28%;" v-for="(m,i) of weekPickerValues" :key="m" @click="onWeekSelect($event, i)" @keydown="onWeekCellKeydown($event,i)"
+                                class="p-monthpicker-month" :class="{'p-highlight': isWeekSelected(i)}" v-ripple>
+                            {{weekHeaderLabel}}<span v-if="m < 10">0</span>{{m}}
+                        </span>
                     </div>
                     <div class="p-monthpicker" v-if="view === 'month'">
                         <span v-for="(m,i) of monthPickerValues" :key="m" @click="onMonthSelect($event, i)" @keydown="onMonthCellKeydown($event,i)"
@@ -160,6 +166,10 @@ export default {
         showIcon: {
             type: Boolean,
             default: false
+        },
+        iconLabel: {
+            type: String,
+            default: ""
         },
         icon: {
             type: String,
@@ -392,6 +402,9 @@ export default {
         isMonthSelected(month) {
             return this.isComparable() ? (this.value.getMonth() === month && this.value.getFullYear() === this.currentYear) : false;
         },
+        isWeekSelected(week) {
+            return this.isComparable() ? (this.getWeekNumber(this.value) === (week + 1) && this.value.getFullYear() === this.currentYear) : false;
+        },
         isDateEquals(value, dateMeta) {
             if (value)
                 return value.getDate() === dateMeta.day && value.getMonth() === dateMeta.month && value.getFullYear() === dateMeta.year;
@@ -553,7 +566,7 @@ export default {
                 return;
             }
 
-            if (this.view === 'month') {
+            if (this.view === 'month' || this.view === 'week') {
                 this.decrementYear();
             }
             else {
@@ -575,7 +588,7 @@ export default {
                 return;
             }
 
-            if (this.view === 'month') {
+            if (this.view === 'month' || this.view === 'week') {
                 this.incrementYear();
             }
             else {
@@ -1254,6 +1267,19 @@ export default {
         onMonthSelect(event, index) {
             this.onDateSelect(event, {year: this.currentYear, month: index, day: 1, selectable: true});
         },
+        onWeekSelect(event, index) {
+            // we need to calc month and day
+            // index is weekNumber - 1 - as it's the index of the clicked element
+            let d = new Date (this.currentYear,0,1,0,0,0);
+            if (this.getWeekNumber(d) !== 1) {
+                d.setTime (d.getTime() + 86400000 * 7);
+            }
+            d.setTime(d.getTime() - (d.getDay() - 1) * 86400000);
+            while (this.getWeekNumber (d) !== (index + 1)) {
+                d.setTime (d.getTime() + 86400000 * 7);
+            }
+            this.onDateSelect(event, {year: d.getFullYear(), month: d.getMonth(), day: d.getDate(), selectable: true});
+        },
         enableModality() {
             if (!this.mask) {
                 this.mask = document.createElement('div');
@@ -1799,6 +1825,76 @@ export default {
                 break;
             }
         },
+        onWeekCellKeydown(event, index) {
+            const cell = event.currentTarget;
+
+            switch (event.which) {
+                //arrows
+                case 38:
+                case 40: {
+                    cell.tabIndex = '-1';
+                    var cells = cell.parentElement.children;
+                    var cellIndex = DomHandler.index(cell);
+                    let nextCell = cells[event.which === 40 ? cellIndex + 3 : cellIndex -3];
+                    if (nextCell) {
+                        nextCell.tabIndex = '0';
+                        nextCell.focus();
+                    }
+                    event.preventDefault();
+                    break;
+                }
+
+                //left arrow
+                case 37: {
+                    cell.tabIndex = '-1';
+                    let prevCell = cell.previousElementSibling;
+                    if (prevCell) {
+                        prevCell.tabIndex = '0';
+                        prevCell.focus();
+                    }
+                    event.preventDefault();
+                    break;
+                }
+
+                //right arrow
+                case 39: {
+                    cell.tabIndex = '-1';
+                    let nextCell = cell.nextElementSibling;
+                    if (nextCell) {
+                        nextCell.tabIndex = '0';
+                        nextCell.focus();
+                    }
+                    event.preventDefault();
+                    break;
+                }
+
+                //enter
+                case 13: {
+                    this.onWeekSelect(event, index);
+                    event.preventDefault();
+                    break;
+                }
+
+                //escape
+                case 27: {
+                    this.overlayVisible = false;
+                    event.preventDefault();
+                    break;
+                }
+
+                //tab
+                case 9: {
+                    if (!this.inline) {
+                         this.trapFocus(event);
+                    }
+                    break;
+                }
+
+                default:
+                    //no op
+                break;
+            }
+        },
         updateFocus() {
             let cell;
             if (this.navigationState) {
@@ -1833,7 +1929,7 @@ export default {
         },
         initFocusableCell() {
             let cell;
-            if (this.view === 'month') {
+            if (this.view === 'month' || this.view === 'week') {
                 let cells = DomHandler.find(this.$refs.overlay, '.p-monthpicker .p-monthpicker-month');
                 let selectedCell= DomHandler.findSingle(this.$refs.overlay, '.p-monthpicker .p-monthpicker-month.p-highlight');
                 cells.forEach(cell => cell.tabIndex = -1);
@@ -2145,6 +2241,15 @@ export default {
 
             return monthPickerValues;
         },
+        weekPickerValues() {
+            let weekPickerValues = [];
+            let d = new Date (this.currentYear,11,31,0,0,0);
+            let lastWeek = this.getWeekNumber(d) === 53 ? 53 : 52
+            for (let i = 1; i <= lastWeek; i++) {
+                weekPickerValues.push(i);
+            }
+            return weekPickerValues;
+        },
         formattedCurrentHour() {
             return this.currentHour < 10 ? '0' + this.currentHour : this.currentHour;
         },
@@ -2267,6 +2372,21 @@ export default {
 /* Month Picker */
 .p-monthpicker-month {
     width: 33.3%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Week Picker */
+.p-weekpicker {
+    min-width: 23rem;
+}
+
+.p-weekpicker-week {
+    width: 14.28%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
